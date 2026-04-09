@@ -1,0 +1,48 @@
+# PersistentVolumeClaims for stateful components.
+# Prometheus and Grafana use emptyDir by default (data lost on pod restart).
+# Apply this file and patch observability.yaml to use these PVCs in production.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: fsi-ai-gateway
+  labels:
+    app: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: ocs-storagecluster-ceph-rbd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: fsi-ai-gateway
+  labels:
+    app: grafana
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: ocs-storagecluster-ceph-rbd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: fsi-ai-gateway
+  labels:
+    app: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ocs-storagecluster-ceph-rbd

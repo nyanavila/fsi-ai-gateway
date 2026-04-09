@@ -1,0 +1,58 @@
+# Local development environment — mirrors the OpenShift deployment.
+# Usage:
+#   cp .env.example .env          # fill in ANTHROPIC_API_KEY
+#   podman compose up --build
+
+version: "3.9"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./app:/app/app:ro    # hot-reload in dev (remove for prod-like testing)
+
+  redis:
+    image: redis:7.2-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./openshift/prometheus-local.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=1d"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    depends_on:
+      - prometheus

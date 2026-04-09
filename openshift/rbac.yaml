@@ -1,0 +1,111 @@
+# RBAC — least-privilege service accounts for each component.
+# The gateway SA needs no cluster permissions.
+# The Prometheus SA needs read access to pods/services for scrape discovery.
+
+# ── Gateway service account ───────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ai-gateway
+  namespace: fsi-ai-gateway
+  labels:
+    app: ai-gateway
+  annotations:
+    # Annotate for Vault agent injection if using HashiCorp Vault
+    # vault.hashicorp.com/agent-inject: "true"
+    # vault.hashicorp.com/role: "ai-gateway"
+automountServiceAccountToken: false   # gateway needs no k8s API access
+---
+# ── Redis service account ─────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis
+  namespace: fsi-ai-gateway
+  labels:
+    app: redis
+automountServiceAccountToken: false
+---
+# ── Prometheus service account ────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: fsi-ai-gateway
+  labels:
+    app: prometheus
+---
+# Prometheus needs cluster-wide pod/service read for SD
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fsi-ai-gateway-prometheus
+  labels:
+    app: prometheus
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - apiGroups: [extensions, networking.k8s.io]
+    resources: [ingresses]
+    verbs: [get, list, watch]
+  - nonResourceURLs: [/metrics, /metrics/cadvisor]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fsi-ai-gateway-prometheus
+  labels:
+    app: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fsi-ai-gateway-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: fsi-ai-gateway
+---
+# ── Grafana service account ───────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: grafana
+  namespace: fsi-ai-gateway
+  labels:
+    app: grafana
+automountServiceAccountToken: false
+---
+# ── Namespace-scoped admin role for ops team ──────────────────────────────────
+# Bind this to your ops group via an LDAP/OIDC group sync in OpenShift
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-ops
+  namespace: fsi-ai-gateway
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, configmaps, events]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch, patch]   # patch allows oc set image / rollout
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch]
+---
+# Bind to your ops team's OpenShift group — replace GROUP_NAME
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: gateway-ops-binding
+  namespace: fsi-ai-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: gateway-ops
+subjects:
+  - kind: Group
+    apiGroup: rbac.authorization.k8s.io
+    name: fsi-gateway-ops   # replace with your LDAP/OIDC group name

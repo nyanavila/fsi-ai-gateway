@@ -1,0 +1,71 @@
+# OpenShift ClusterLogForwarder — ships gateway JSON logs to enterprise SIEM.
+#
+# Prerequisites:
+#   oc apply -f https://github.com/openshift/cluster-logging-operator/...
+#   (or install via OperatorHub: "Red Hat OpenShift Logging")
+#
+# This config:
+#   1. Collects container logs from the fsi-ai-gateway namespace only
+#   2. Parses structured JSON (our gateway emits JSON logs natively)
+#   3. Forwards to a Splunk HEC endpoint AND an internal Elasticsearch/OpenSearch
+#   4. Keeps a local copy in the default OpenShift log store for 30 days
+
+apiVersion: logging.openshift.io/v1
+kind: ClusterLogForwarder
+metadata:
+  name: fsi-ai-gateway-forwarder
+  namespace: openshift-logging
+spec:
+  inputs:
+    - name: gateway-logs
+      application:
+        namespaces:
+          - fsi-ai-gateway
+        selector:
+          matchLabels:
+            app: ai-gateway   # only gateway pods, not Redis/Prometheus
+
+  outputs:
+    # ── Splunk HEC (primary SIEM) ─────────────────────────────────────────────
+    - name: splunk-siem
+      type: splunk_hec
+      url: "https://splunk.internal.example.com:8088"   # <-- your Splunk HEC URL
+      secret:
+        name: splunk-hec-secret    # create separately: oc create secret generic splunk-hec-secret --from-literal=hecToken=<TOKEN>
+      splunk:
+        index: fsi_ai_gateway
+        fields:
+          environment: production
+          cluster: ocp-prod
+          service: ai-gateway
+
+    # ── OpenSearch / Elasticsearch (secondary, for Kibana dashboards) ─────────
+    - name: opensearch-local
+      type: elasticsearch
+      url: "https://opensearch.fsi-ai-gateway.svc:9200"
+      secret:
+        name: opensearch-secret    # oc create secret generic opensearch-secret --from-literal=username=admin --from-literal=password=<PW>
+      elasticsearch:
+        index: fsi-gateway-logs
+
+  pipelines:
+    - name: gateway-to-siem
+      inputRefs:
+        - gateway-logs
+      outputRefs:
+        - splunk-siem
+        - opensearch-local
+        - default          # also write to OpenShift's built-in log store
+      parse: json          # parse our JSON log lines into structured fields
+      labels:
+        classification: fsi-audit   # label for compliance tagging
+---
+# Secret template — fill in and apply before the ClusterLogForwarder
+# oc create secret generic splunk-hec-secret \
+#   --from-literal=hecToken=YOUR_SPLUNK_HEC_TOKEN \
+#   -n openshift-logging
+#
+# oc create secret generic opensearch-secret \
+#   --from-literal=username=admin \
+#   --from-literal=password=YOUR_OPENSEARCH_PASSWORD \
+#   -n openshift-logging

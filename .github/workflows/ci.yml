@@ -1,0 +1,224 @@
+# CI/CD pipeline — GitHub Actions
+# Triggers: push to main, PRs, manual dispatch
+#
+# Pipeline:
+#   1. Lint        — ruff static analysis
+#   2. Test        — pytest with coverage gate (70%)
+#   3. Build       — docker buildx (multi-arch: amd64 + arm64)
+#   4. Push        — quay.io on main branch only
+#   5. Deploy      — oc apply to OpenShift on main branch only
+#
+# Required secrets (set in GitHub repo Settings → Secrets):
+#   QUAY_USERNAME, QUAY_PASSWORD
+#   OCP_SERVER, OCP_TOKEN, OCP_NAMESPACE
+#   ANTHROPIC_API_KEY   (for integration tests only — keep locked down)
+
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to OpenShift after build?"
+        required: false
+        default: "false"
+        type: boolean
+
+env:
+  REGISTRY: quay.io
+  IMAGE:    nyanavila/ai-gateway    # <-- update with your org
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ── Job 1: Lint ──────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install ruff
+        run: pip install ruff==0.6.9
+
+      - name: Lint app
+        run: ruff check app/ tests/
+
+      - name: Lint format check
+        run: ruff format --check app/ tests/
+
+  # ── Job 2: Test ──────────────────────────────────────────────────────────────
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: lint
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests with coverage
+        env:
+          ANTHROPIC_API_KEY: "sk-ant-test-key"   # unit tests mock the API
+          REDIS_URL: "redis://localhost:6379/0"
+        run: |
+          pytest tests/ -v \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        if: matrix.python-version == '3.12'
+        with:
+          file: coverage.xml
+          fail_ci_if_error: false
+
+  # ── Job 3: Build & Push ───────────────────────────────────────────────────────
+  build:
+    name: Build image
+    runs-on: ubuntu-latest
+    needs: test
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Quay.io
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.QUAY_USERNAME }}
+          password: ${{ secrets.QUAY_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build (and push on main)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo "Digest ${{ steps.build.outputs.digest }}"
+
+  # ── Job 4: Deploy ─────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to OpenShift
+    runs-on: ubuntu-latest
+    needs: build
+    if: |
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || inputs.deploy == 'true')
+    environment: production   # requires manual approval gate in GitHub Environments
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install oc CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: "4"
+
+      - name: Log in to OpenShift
+        uses: redhat-actions/oc-login@v1
+        with:
+          openshift_server_url: ${{ secrets.OCP_SERVER }}
+          openshift_token:      ${{ secrets.OCP_TOKEN }}
+          namespace:            ${{ secrets.OCP_NAMESPACE }}
+          insecure_skip_tls_verify: false
+
+      - name: Apply manifests
+        run: |
+          oc apply -f openshift/configmap.yaml
+          oc apply -f openshift/rbac.yaml
+          oc apply -f openshift/quota.yaml
+          oc apply -f openshift/pvc.yaml
+          oc apply -f openshift/redis.yaml
+          oc apply -f openshift/observability.yaml
+          oc apply -f openshift/deployment.yaml
+          oc apply -f openshift/service-route.yaml
+          oc apply -f openshift/hpa.yaml
+          oc apply -f openshift/pdb.yaml
+          oc apply -f openshift/networkpolicy.yaml
+
+      - name: Update image tag
+        run: |
+          IMAGE_TAG="${{ env.REGISTRY }}/${{ env.IMAGE }}:sha-${{ github.sha }}"
+          oc set image deployment/ai-gateway ai-gateway="${IMAGE_TAG}" \
+            -n ${{ secrets.OCP_NAMESPACE }}
+
+      - name: Wait for rollout
+        run: |
+          oc rollout status deployment/ai-gateway \
+            -n ${{ secrets.OCP_NAMESPACE }} \
+            --timeout=5m
+
+      - name: Smoke test
+        run: |
+          GATEWAY=$(oc get route ai-gateway \
+            -n ${{ secrets.OCP_NAMESPACE }} \
+            -o jsonpath='{.spec.host}')
+          echo "Gateway: $GATEWAY"
+          curl -sf "https://${GATEWAY}/health" | jq .
+          curl -sf "https://${GATEWAY}/ready"  | jq .
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::Deploy failed — rolling back"
+          oc rollout undo deployment/ai-gateway -n ${{ secrets.OCP_NAMESPACE }}

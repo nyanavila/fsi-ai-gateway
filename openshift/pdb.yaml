@@ -1,0 +1,27 @@
+# PodDisruptionBudget — ensures at least 1 gateway pod stays up during
+# node drains, upgrades, and maintenance windows.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: ai-gateway-pdb
+  namespace: fsi-ai-gateway
+  labels:
+    app: ai-gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: ai-gateway
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: fsi-ai-gateway
+  labels:
+    app: redis
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: redis

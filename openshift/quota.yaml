@@ -1,0 +1,56 @@
+# ResourceQuota — hard limits for the entire namespace.
+# Prevents runaway resource consumption and enforces FSI cost controls.
+
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: fsi-ai-gateway-quota
+  namespace: fsi-ai-gateway
+spec:
+  hard:
+    # Compute
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "16"
+    limits.memory: 16Gi
+    # Object counts
+    pods: "30"
+    services: "15"
+    persistentvolumeclaims: "10"
+    secrets: "20"
+    configmaps: "20"
+    # Prevent accidental LoadBalancer creation (use Routes instead)
+    services.loadbalancers: "0"
+    services.nodeports: "0"
+---
+# LimitRange — default resource requests/limits for containers
+# that don't specify their own (prevents unbounded pods)
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: fsi-ai-gateway-limits
+  namespace: fsi-ai-gateway
+spec:
+  limits:
+    - type: Container
+      default:         # applied when limits not specified
+        cpu: "500m"
+        memory: "512Mi"
+      defaultRequest:  # applied when requests not specified
+        cpu: "100m"
+        memory: "128Mi"
+      max:             # hard ceiling per container
+        cpu: "2"
+        memory: "4Gi"
+      min:             # must request at least this
+        cpu: "50m"
+        memory: "64Mi"
+    - type: Pod
+      max:
+        cpu: "4"
+        memory: "8Gi"
+    - type: PersistentVolumeClaim
+      max:
+        storage: 50Gi
+      min:
+        storage: 1Gi

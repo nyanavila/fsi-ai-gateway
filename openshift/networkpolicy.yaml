@@ -1,0 +1,97 @@
+# NetworkPolicy — FSI-grade egress/ingress controls.
+# Default-deny all traffic, then allow only what is needed.
+
+# 1. Default deny all ingress in the namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: fsi-ai-gateway
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# 2. Allow the OpenShift router to reach the gateway on port 8080
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-router-to-gateway
+  namespace: fsi-ai-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              network.openshift.io/policy-group: ingress
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# 3. Allow Prometheus to scrape the gateway /metrics endpoint
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: fsi-ai-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: ai-gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: prometheus
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+# 4. Allow gateway to reach Redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-gateway-to-redis
+  namespace: fsi-ai-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: ai-gateway
+      ports:
+        - protocol: TCP
+          port: 6379
+---
+# 5. Allow Grafana to reach Prometheus
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-grafana-to-prometheus
+  namespace: fsi-ai-gateway
+spec:
+  podSelector:
+    matchLabels:
+      app: prometheus
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: grafana
+      ports:
+        - protocol: TCP
+          port: 9090
