@@ -1,6 +1,6 @@
 .PHONY: help dev test test-cov lint build push deploy clean
 
-REGISTRY   ?= quay.io/nyanavila
+REGISTRY   ?= quay.io/navila
 IMAGE      ?= ai-gateway
 TAG        ?= latest
 NAMESPACE  ?= fsi-ai-gateway

@@ -3,7 +3,7 @@
 # FSI AI Gateway — full deploy script
 # Cluster : https://api.cluster-9n5fl.9n5fl.sandbox3963.opentlc.com:6443
 # Namespace: fsi-ai-gateway
-# Image    : quay.io/nyanavila/ai-gateway:latest
+# Image    : quay.io/navila/ai-gateway:latest
 #
 # Usage:
 #   chmod +x deploy.sh
@@ -12,7 +12,7 @@
 set -euo pipefail
 
 NAMESPACE="fsi-ai-gateway"
-IMAGE="quay.io/nyanavila/ai-gateway:latest"
+IMAGE="quay.io/navila/ai-gateway:latest"
 CLUSTER="https://api.cluster-9n5fl.9n5fl.sandbox3963.opentlc.com:6443"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -66,10 +66,10 @@ oc create secret generic ai-gateway-secrets \
 info "Secret created"
 
 # ── Quay pull secret (if repo is private) ─────────────────────────────────────
-# Uncomment if your quay.io/nyanavila/ai-gateway repo is private:
+# Uncomment if your quay.io/navila/ai-gateway repo is private:
 # oc create secret docker-registry quay-pull-secret \
 #   --docker-server=quay.io \
-#   --docker-username=nyanavila \
+#   --docker-username=navila \
 #   --docker-password="YOUR_QUAY_TOKEN" \
 #   -n "$NAMESPACE"
 # oc secrets link default quay-pull-secret --for=pull -n "$NAMESPACE"

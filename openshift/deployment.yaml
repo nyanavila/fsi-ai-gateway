@@ -28,7 +28,7 @@ spec:
     spec:
       containers:
         - name: ai-gateway
-          image: quay.io/nyanavila/ai-gateway:latest
+          image: quay.io/navila/ai-gateway:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
