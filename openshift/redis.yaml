@@ -20,7 +20,15 @@ spec:
           image: redis:7.2-alpine
           ports:
             - containerPort: 6379
-          args: ["--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+          args:
+            - "--save"
+            - ""
+            - "--stop-writes-on-bgsave-error"
+            - "no"
+            - "--maxmemory"
+            - "512mb"
+            - "--maxmemory-policy"
+            - "allkeys-lru"
           resources:
             requests:
               cpu: "100m"
@@ -28,11 +36,6 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-          readinessProbe:
-            exec:
-              command: ["redis-cli", "ping"]
-            initialDelaySeconds: 5
-            periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
